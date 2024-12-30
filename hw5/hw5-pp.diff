@@ -1,0 +1,372 @@
+[1mdiff --git a/Makefile b/Makefile[m
+[1mnew file mode 100644[m
+[1mindex 0000000..6c83d5f[m
+[1m--- /dev/null[m
+[1m+++ b/Makefile[m
+[36m@@ -0,0 +1,28 @@[m
+[32m+[m[32m# Makefile for building and testing UCX-lsalab[m
+[32m+[m
+[32m+[m[32m# Directory where UCX-lsalab should be built[m
+[32m+[m[32mBUILDDIR  = build[m
+[32m+[m
+[32m+[m[32m# Installation prefix[m
+[32m+[m[32mPREFIX    = $(HOME)/ucx-pp[m
+[32m+[m
+[32m+[m[32m.PHONY: all build install test clean[m
+[32m+[m
+[32m+[m[32mall: install[m
+[32m+[m
+[32m+[m[32mbuild:[m
+[32m+[m	[32mmkdir -p $(BUILDDIR)[m
+[32m+[m	[32mcd $(BUILDDIR) && ../configure --prefix=$(PREFIX) --with-go=no[m
+[32m+[m	[32m# Compile (rebuild if anything changed) using SLURM srun:[m
+[32m+[m	[32mcd $(BUILDDIR) && srun -n 1 -c 12 make -j12[m
+[32m+[m
+[32m+[m[32minstall: build[m
+[32m+[m	[32mcd $(BUILDDIR) && srun -n 1 -c 12 make -j12 install[m
+[32m+[m
+[32m+[m[32mtest: install[m
+[32m+[m	[32m# Load the custom UCX build and run the test case with mpiucx[m
+[32m+[m	[32mmodule load openmpi/ucx-pp[m
+[32m+[m	[32mmpiucx -x UCX_LOG_LEVEL=info -np 2 ./mpi_hello.out[m
+[32m+[m
+[32m+[m[32mclean:[m
+[32m+[m	[32mrm -rf $(BUILDDIR)[m
+\ No newline at end of file[m
+[1mdiff --git a/examples/ucp_hello_world.c b/examples/ucp_hello_world.c[m
+[1mindex d07dd47..2256c01 100644[m
+[1m--- a/examples/ucp_hello_world.c[m
+[1m+++ b/examples/ucp_hello_world.c[m
+[36m@@ -572,6 +572,7 @@[m [mint main(int argc, char **argv)[m
+     ucp_params.request_init    = request_init;[m
+     ucp_params.name            = "hello_world";[m
+ [m
+[32m+[m[32m    // Josh: Calls ucp_init_version() in ucp_context.c[m
+     status = ucp_init(&ucp_params, config, &ucp_context);[m
+ [m
+     if (print_config) {[m
+[1mdiff --git a/src/ucp/api/ucp.h b/src/ucp/api/ucp.h[m
+[1mindex 28307f5..1fbeb9b 100644[m
+[1m--- a/src/ucp/api/ucp.h[m
+[1m+++ b/src/ucp/api/ucp.h[m
+[36m@@ -2013,6 +2013,7 @@[m [mconst char *ucp_get_version_string(void);[m
+  *  This is an internal routine used to check compatibility with a particular[m
+  * API version. @ref ucp_init should be used to create UCP context.[m
+  */[m
+[32m+[m[32m// Josh: Implemented in ucp_context.c[m
+ ucs_status_t ucp_init_version(unsigned api_major_version, unsigned api_minor_version,[m
+                               const ucp_params_t *params, const ucp_config_t *config,[m
+                               ucp_context_h *context_p);[m
+[1mdiff --git a/src/ucp/core/ucp_context.c b/src/ucp/core/ucp_context.c[m
+[1mindex 304a3fa..d4fc847 100644[m
+[1m--- a/src/ucp/core/ucp_context.c[m
+[1m+++ b/src/ucp/core/ucp_context.c[m
+[36m@@ -591,14 +591,17 @@[m [mconst ucp_tl_bitmap_t ucp_tl_bitmap_max = {{UINT64_MAX, UINT64_MAX}};[m
+ const ucp_tl_bitmap_t ucp_tl_bitmap_min = UCS_BITMAP_ZERO;[m
+ [m
+ [m
+[32m+[m[32m// Josh: Constructs a ucp_config_t object, which holds UCX’s runtime configuration (e.g., from the environment and config files).[m
+ ucs_status_t ucp_config_read(const char *env_prefix, const char *filename,[m
+                              ucp_config_t **config_p)[m
+ {[m
+[32m+[m[32m    // Josh: UCS_DEFAULT_ENV_PREFIX "UCX_"[m
+     unsigned full_prefix_len = sizeof(UCS_DEFAULT_ENV_PREFIX);[m
+     unsigned env_prefix_len  = 0;[m
+     ucp_config_t *config;[m
+     ucs_status_t status;[m
+ [m
+[32m+[m[32m    // Josh: Dynamically allocates memory for the ucp_config_t structure.[m
+     config = ucs_malloc(sizeof(*config), "ucp config");[m
+     if (config == NULL) {[m
+         status = UCS_ERR_NO_MEMORY;[m
+[36m@@ -625,6 +628,7 @@[m [mucs_status_t ucp_config_read(const char *env_prefix, const char *filename,[m
+                           UCS_DEFAULT_ENV_PREFIX);[m
+     }[m
+ [m
+[32m+[m[32m    // Josh: Loads default values, then applies environment variables or config-file overrides.[m
+     status = ucs_config_parser_fill_opts(config,[m
+                                          UCS_CONFIG_GET_TABLE(ucp_config_table),[m
+                                          config->env_prefix, 0);[m
+[36m@@ -1611,6 +1615,7 @@[m [mstatic void ucp_fill_resources_reg_md_map_update(ucp_context_h context)[m
+     }[m
+ }[m
+ [m
+[32m+[m[32m// Josh: Discovers and sets up the available UCT (UCX Transport) resources for a given UCP context.[m
+ static ucs_status_t ucp_fill_resources(ucp_context_h context,[m
+                                        const ucp_config_t *config)[m
+ {[m
+[36m@@ -1713,6 +1718,7 @@[m [mstatic ucs_status_t ucp_fill_resources(ucp_context_h context,[m
+     }[m
+ [m
+     /* Collect resources of each component */[m
+[32m+[m[32m    // Josh: Get a list of transport-layer resources[m
+     for (i = 0; i < context->num_cmpts; ++i) {[m
+         status = ucp_add_component_resources(context, i, avail_devices,[m
+                                              &avail_tls, dev_cfg_masks,[m
+[36m@@ -2120,6 +2126,7 @@[m [mucp_version_check(unsigned api_major_version, unsigned api_minor_version)[m
+     }[m
+ }[m
+ [m
+[32m+[m[32m// Josh: Initializes a UCP context, which holds the global resources and configuration for the UCP (high-level API) layer.[m
+ ucs_status_t ucp_init_version(unsigned api_major_version, unsigned api_minor_version,[m
+                               const ucp_params_t *params, const ucp_config_t *config,[m
+                               ucp_context_h *context_p)[m
+[36m@@ -2130,6 +2137,8 @@[m [mucs_status_t ucp_init_version(unsigned api_major_version, unsigned api_minor_ver[m
+ [m
+     ucp_version_check(api_major_version, api_minor_version);[m
+ [m
+[32m+[m[32m    // Josh: Reads and parses the default UCX config (environment variables, config file, etc.)[m
+[32m+[m[32m    // and stores the results in dfl_config[m
+     if (config == NULL) {[m
+         status = ucp_config_read(NULL, NULL, &dfl_config);[m
+         if (status != UCS_OK) {[m
+[36m@@ -2147,6 +2156,7 @@[m [mucs_status_t ucp_init_version(unsigned api_major_version, unsigned api_minor_ver[m
+ [m
+     ucs_list_head_init(&context->cached_key_list);[m
+ [m
+[32m+[m[32m    // Josh: Applies the config from config to the ucp_context_t.[m
+     status = ucp_fill_config(context, params, config);[m
+     if (status != UCS_OK) {[m
+         goto err_free_ctx;[m
+[36m@@ -2158,6 +2168,13 @@[m [mucs_status_t ucp_init_version(unsigned api_major_version, unsigned api_minor_ver[m
+     UCP_THREAD_LOCK_INIT(&context->mt_lock);[m
+ [m
+     /* fill resources we should use */[m
+[32m+[m[32m    /*[m
+[32m+[m[32m     *  Josh: Internal “resource discovery” function that enumerates all possible lower-level UCT transports (network interfaces), filters them,[m
+[32m+[m[32m     *  and populates the UCP context with whatever is ultimately usable in your environment.[m
+[32m+[m[32m     *  Discovers or sets up underlying MDs (Memory Domains), transport layers (TLs), or devices.[m
+[32m+[m[32m     *  Typically iterates through the available transports (e.g., IB, TCP, SHM) and selects those matching the user’s config.[m
+[32m+[m[32m     *  Records how many MDs (context->num_mds), how many TLs (context->num_tls), and sets a tl_bitmap (which TLs are valid).[m
+[32m+[m[32m     */[m
+     status = ucp_fill_resources(context, config);[m
+     if (status != UCS_OK) {[m
+         goto err_thread_lock_finalize;[m
+[36m@@ -2166,6 +2183,15 @@[m [mucs_status_t ucp_init_version(unsigned api_major_version, unsigned api_minor_ver[m
+     context->uuid             = ucs_generate_uuid((uintptr_t)context);[m
+     context->next_memh_reg_id = 0;[m
+ [m
+[32m+[m[32m    /*[m
+[32m+[m[32m     *  Josh: UCX attempts to create a memory registration cache, which can accelerate repeated memory registrations.[m
+[32m+[m[32m     *  In modern high-performance networks (e.g., InfiniBand, RoCE), you typically must “register” host memory with[m
+[32m+[m[32m     *  the network adapter before performing zero-copy operations. Registration pins pages in memory and provides the[m[41m [m
+[32m+[m[32m     *  hardware a handle for direct I/O. However, registration can be somewhat expensive if done repeatedly, especially[m[41m [m
+[32m+[m[32m     *  in short-lifetime scenarios (e.g., small messages in tight loops).[m
+[32m+[m[32m     *  Next time UCX sees the same memory pointer (or a region overlapping a previously registered block), it can quickly[m
+[32m+[m[32m     *  retrieve the existing registration handle instead of issuing a costly new registration call.[m
+[32m+[m[32m     */[m
+     if (config->enable_rcache != UCS_NO) {[m
+         status = ucp_mem_rcache_init(context);[m
+         if (status != UCS_OK) {[m
+[36m@@ -2186,6 +2212,13 @@[m [mucs_status_t ucp_init_version(unsigned api_major_version, unsigned api_minor_ver[m
+         ucp_config_release(dfl_config);[m
+     }[m
+ [m
+[32m+[m[32m    /*[m
+[32m+[m[32m     *  Josh: Creates a Virtual File System (VFS) entry for this context, allowing introspection or run-time debugging if VFS is enabled.[m
+[32m+[m[32m     *  UCX includes optional support for a pseudo “virtual file system” that exposes internal objects (like context, worker, endpoints, etc.)[m
+[32m+[m[32m     *  through a file-like hierarchy. Internally, UCX attaches instrumentation/metadata to structures in such a way that a debugging tool (or the UCX VFS plugin)[m
+[32m+[m[32m     *  can read them at runtime—just like reading files in a special directory.[m
+[32m+[m[32m     */[m
+[32m+[m[41m    [m
+     ucp_context_create_vfs(context);[m
+ [m
+     ucs_debug("created ucp context %s %p [%d mds %d tls] features 0x%" PRIx64[m
+[1mdiff --git a/src/ucp/core/ucp_context.h b/src/ucp/core/ucp_context.h[m
+[1mindex 01773db..a83430d 100644[m
+[1m--- a/src/ucp/core/ucp_context.h[m
+[1m+++ b/src/ucp/core/ucp_context.h[m
+[36m@@ -477,7 +477,7 @@[m [mtypedef struct ucp_tl_iface_atomic_flags {[m
+         } \[m
+     } while (0)[m
+ [m
+[31m-[m
+[32m+[m[32m// Josh: UCS_PARAM_VALUE() in UCX-lsalab/src/ucs/type/param.h[m
+ #define UCP_PARAM_VALUE(_obj, _params, _name, _flag, _default) \[m
+     UCS_PARAM_VALUE(UCS_PP_TOKENPASTE3(UCP_, _obj, _PARAM_FIELD), _params, \[m
+                     _name, _flag, _default)[m
+[1mdiff --git a/src/ucp/core/ucp_ep.c b/src/ucp/core/ucp_ep.c[m
+[1mindex 1c0f16c..d96a8b9 100644[m
+[1m--- a/src/ucp/core/ucp_ep.c[m
+[1m+++ b/src/ucp/core/ucp_ep.c[m
+[36m@@ -1180,12 +1180,18 @@[m [mucs_status_t ucp_ep_create(ucp_worker_h worker, const ucp_ep_params_t *params,[m
+     unsigned flags = UCP_PARAM_VALUE(EP, params, flags, FLAGS, 0);[m
+     ucs_status_t status;[m
+ [m
+[32m+[m[32m    // Josh: Located at src/ucs/async/async.h[m
+[32m+[m[32m    // Acquires a lock (or blocks asynchronous callbacks) to ensure thread safety while creating or modifying endpoints on the worker.[m
+     UCS_ASYNC_BLOCK(&worker->async);[m
+ [m
+[32m+[m[32m    // Josh: Check which endpoint creation path is requested and invoke the relevant internal creation routine[m
+[32m+[m[32m    // Creating an endpoint for “client-server” connections (likely using a socket address)[m
+     if (flags & UCP_EP_PARAMS_FLAGS_CLIENT_SERVER) {[m
+         status = ucp_ep_create_to_sock_addr(worker, params, &ep);[m
+[32m+[m[32m    // Josh: The user provided a connection request (e.g., an incoming connection from a listener)[m
+     } else if (params->field_mask & UCP_EP_PARAM_FIELD_CONN_REQUEST) {[m
+         status = ucp_ep_create_api_conn_request(worker, params, &ep);[m
+[32m+[m[32m    // Josh: The user provided a remote worker’s address (the classic “peer-to-peer” UCX mode)[m
+     } else if (params->field_mask & UCP_EP_PARAM_FIELD_REMOTE_ADDRESS) {[m
+         status = ucp_ep_create_api_to_worker_addr(worker, params, &ep);[m
+     } else {[m
+[1mdiff --git a/src/ucp/core/ucp_worker.c b/src/ucp/core/ucp_worker.c[m
+[1mindex 5adcee9..0a957fb 100644[m
+[1m--- a/src/ucp/core/ucp_worker.c[m
+[1m+++ b/src/ucp/core/ucp_worker.c[m
+[36m@@ -1766,6 +1766,7 @@[m [mucp_worker_print_used_tls(ucp_worker_h worker, ucp_worker_cfg_index_t cfg_index)[m
+     const ucp_ep_config_key_t *key = &ucs_array_elem(&worker->ep_config,[m
+                                                      cfg_index).key;[m
+     ucp_context_h context          = worker->context;[m
+[32m+[m[32m    // Josh: Declared at UCX-lsalab/src/ucs/datastruct/string_buffer.h for allocating a string buffer[m
+     UCS_STRING_BUFFER_ONSTACK(strb, 256);[m
+     ucp_lane_map_t tag_lanes_map    = 0;[m
+     ucp_lane_map_t rma_lanes_map    = 0;[m
+[36m@@ -1778,6 +1779,9 @@[m [mucp_worker_print_used_tls(ucp_worker_h worker, ucp_worker_cfg_index_t cfg_index)[m
+     int num_valid_lanes             = 0;[m
+     ucp_lane_index_t lane;[m
+ [m
+[32m+[m[32m    // Josh: For getting the configurations[m
+[32m+[m[32m    // ucp_config_t *config;[m
+[32m+[m
+     ucp_ep_config_name(worker, cfg_index, &strb);[m
+ [m
+     for (lane = 0; lane < key->num_lanes; ++lane) {[m
+[36m@@ -1852,7 +1856,19 @@[m [mucp_worker_print_used_tls(ucp_worker_h worker, ucp_worker_cfg_index_t cfg_index)[m
+ [m
+     ucs_string_buffer_rtrim(&strb, "; ");[m
+ [m
+[32m+[m[32m    ucp_config_t *config;[m
+[32m+[m
+[32m+[m[32m    // Josh: Defined at UCX-lsalab/src/ucs/debug/log_def.h[m
+     ucs_info("%s", ucs_string_buffer_cstr(&strb));[m
+[32m+[m
+[32m+[m[32m    // Josh: Read the configurations into config[m
+[32m+[m[32m    ucp_config_read(NULL, NULL, &config);[m
+[32m+[m[41m    [m
+[32m+[m[32m    ucp_config_print(config, stdout, NULL, UCS_CONFIG_PRINT_TLS);[m
+[32m+[m[32m    fprintf(stdout, "%s\n", ucs_string_buffer_cstr(&strb));[m
+[32m+[m
+[32m+[m[32m    // 3. Release[m
+[32m+[m[32m    ucp_config_release(config);[m
+ }[m
+ [m
+ static ucs_status_t ucp_worker_init_mpools(ucp_worker_h worker)[m
+[36m@@ -2381,6 +2397,7 @@[m [mucs_status_t ucp_worker_create(ucp_context_h context,[m
+     /* Initialize endpoint allocator */[m
+     ucs_strided_alloc_init(&worker->ep_alloc, sizeof(ucp_ep_t), 1);[m
+ [m
+[32m+[m[32m    // Josh: UCP_PARAM_VALUE() in ucp_context.h[m
+     worker->user_data    = UCP_PARAM_VALUE(WORKER, params, user_data, USER_DATA,[m
+                                            NULL);[m
+     worker->am.alignment = UCP_PARAM_VALUE(WORKER, params, am_alignment,[m
+[36m@@ -2394,11 +2411,13 @@[m [mucs_status_t ucp_worker_create(ucp_context_h context,[m
+         ucs_snprintf_zero(worker->name, UCP_ENTITY_NAME_MAX, "%p", worker);[m
+     }[m
+ [m
+[32m+[m[32m    // Josh: Creates a default address name (hostname + process ID). This is used in worker addresses exchanged between peers.[m
+     name_length = ucs_min(UCP_WORKER_ADDRESS_NAME_MAX,[m
+                           context->config.ext.max_worker_address_name + 1);[m
+     ucs_snprintf_zero(worker->address_name, name_length, "%s:%d",[m
+                       ucs_get_host_name(), getpid());[m
+ [m
+[32m+[m[32m    // Josh: Initializes pointer maps to keep track of UCP endpoints and requests.[m
+     status = UCS_PTR_MAP_INIT(ep, &worker->ep_map);[m
+     if (status != UCS_OK) {[m
+         goto err_free;[m
+[36m@@ -2409,6 +2428,7 @@[m [mucs_status_t ucp_worker_create(ucp_context_h context,[m
+         goto err_destroy_ep_map;[m
+     }[m
+ [m
+[32m+[m[32m    // Josh: Prepares a dynamic array of endpoint configurations. This may be adjusted at runtime as endpoints are created.[m
+     ucs_array_init_dynamic(&worker->ep_config);[m
+     /* There may be a race when UD async thread reallocs ep_config array while[m
+      * main thread is accessing it.[m
+[36m@@ -2416,6 +2436,7 @@[m [mucs_status_t ucp_worker_create(ucp_context_h context,[m
+     ucs_array_reserve(ep_config_arr, &worker->ep_config, 64);[m
+ [m
+     /* Create statistics */[m
+[32m+[m[32m    // Josh: Sets up UCX/UCT statistics gathering. UCX has extensive statistics facilities to track events, performance, etc.[m
+     status = UCS_STATS_NODE_ALLOC(&worker->stats, &ucp_worker_stats_class,[m
+                                   ucs_stats_get_root(), "-%p", worker);[m
+     if (status != UCS_OK) {[m
+[36m@@ -2429,6 +2450,9 @@[m [mucs_status_t ucp_worker_create(ucp_context_h context,[m
+         goto err_free_stats;[m
+     }[m
+ [m
+[32m+[m[32m    // Josh: Function in UCX-lsalab/src/ucs/async/async.c[m
+[32m+[m[32m    // The ucs_async_context manages thread-safety and asynchronous events for the worker.[m
+[32m+[m[32m    // If multi-threading is enabled, it uses a thread mutex; otherwise, it may use a lighter mechanism.[m
+     status = ucs_async_context_init(&worker->async,[m
+                                     context->config.ext.use_mt_mutex ?[m
+                                     UCS_ASYNC_MODE_THREAD_MUTEX :[m
+[36m@@ -2438,12 +2462,14 @@[m [mucs_status_t ucp_worker_create(ucp_context_h context,[m
+     }[m
+ [m
+     /* Create the underlying UCT worker */[m
+[32m+[m[32m    // Josh: Creates the lower-level UCT worker which is the transport layer resource manager.[m
+     status = uct_worker_create(&worker->async, uct_thread_mode, &worker->uct);[m
+     if (status != UCS_OK) {[m
+         goto err_destroy_async;[m
+     }[m
+ [m
+     /* Create UCS event set which combines events from all transports */[m
+[32m+[m[32m    // Josh: Initializes mechanisms for wake-up, enabling event-driven communication if the underlying transports support it.[m
+     status = ucp_worker_wakeup_init(worker, params);[m
+     if (status != UCS_OK) {[m
+         goto err_destroy_uct_worker;[m
+[36m@@ -2460,6 +2486,8 @@[m [mucs_status_t ucp_worker_create(ucp_context_h context,[m
+                         UCP_EP_MATCH_CONN_SN_MAX, &ucp_ep_match_ops);[m
+ [m
+     /* Open all resources as interfaces on this worker */[m
+[32m+[m[32m    // Josh: For each transport and connection manager (like TCP, InfiniBand, shared memory, etc.),[m
+[32m+[m[32m    // the worker opens a corresponding “interface” or “connection manager” resource.[m
+     status = ucp_worker_add_resource_ifaces(worker);[m
+     if (status != UCS_OK) {[m
+         goto err_conn_match_cleanup;[m
+[1mdiff --git a/src/ucs/config/parser.c b/src/ucs/config/parser.c[m
+[1mindex a13d508..b47b8d4 100644[m
+[1m--- a/src/ucs/config/parser.c[m
+[1m+++ b/src/ucs/config/parser.c[m
+[36m@@ -1844,6 +1844,12 @@[m [mucs_config_parser_print_opts_recurs(FILE *stream, const void *opts,[m
+                 !(flags & UCS_CONFIG_PRINT_HIDDEN)) {[m
+                 continue;[m
+             }[m
+[32m+[m
+[32m+[m[32m            // Josh: The field name is declared within ucp_config_table[] in UCX-lsalab/src/ucp/core/ucp_context.c[m
+[32m+[m[32m            if ((flags & UCS_CONFIG_PRINT_TLS) &&[m
+[32m+[m[32m                        strcmp(field->name, "TLS")) {[m
+[32m+[m[32m                continue;[m
+[32m+[m[32m            }[m
+             ucs_config_parser_print_field(stream, opts, prefix, prefix_list,[m
+                                           field->name, field, flags, NULL);[m
+         }[m
+[36m@@ -1877,9 +1883,14 @@[m [mvoid ucs_config_parser_print_opts(FILE *stream, const char *title, const void *o[m
+                                             prefix, &prefix_list);[m
+     }[m
+ [m
+[32m+[m
+     // TODO: PP-HW-UCX[m
+[31m-    if (flags /*& UCS_CONFIG_PRINT_TLS*/) {[m
+[32m+[m[32m    if (flags & UCS_CONFIG_PRINT_TLS) {[m
+[32m+[m[32m        // Josh: Add at least one prefix element, or the parser will crash due to empty list[m
+[32m+[m[32m        table_prefix_elem.prefix = table_prefix ? table_prefix : "";[m
+[32m+[m[32m        ucs_list_add_tail(&prefix_list, &table_prefix_elem.list);[m
+ [m
+[32m+[m[32m        ucs_config_parser_print_opts_recurs(stream, opts, fields, flags, prefix, &prefix_list);[m
+     }[m
+ [m
+     if (flags & UCS_CONFIG_PRINT_HEADER) {[m
+[1mdiff --git a/src/ucs/config/types.h b/src/ucs/config/types.h[m
+[1mindex c300a6b..4e461ea 100644[m
+[1m--- a/src/ucs/config/types.h[m
+[1m+++ b/src/ucs/config/types.h[m
+[36m@@ -90,7 +90,9 @@[m [mtypedef enum {[m
+     UCS_CONFIG_PRINT_HEADER          = UCS_BIT(1),[m
+     UCS_CONFIG_PRINT_DOC             = UCS_BIT(2),[m
+     UCS_CONFIG_PRINT_HIDDEN          = UCS_BIT(3),[m
+[31m-    UCS_CONFIG_PRINT_COMMENT_DEFAULT = UCS_BIT(4)[m
+[32m+[m[32m    UCS_CONFIG_PRINT_COMMENT_DEFAULT = UCS_BIT(4),[m
+[32m+[m[32m    // Josh add[m
+[32m+[m[32m    UCS_CONFIG_PRINT_TLS             = UCS_BIT(5)[m
+ } ucs_config_print_flags_t;[m
+ [m
+ [m
